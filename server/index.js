@@ -17,6 +17,7 @@ import {
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const isDirectRun = process.argv[1] && path.resolve(process.argv[1]) === __filename;
 const rootDir = path.resolve(__dirname, "..");
 const port = Number(process.env.PORT || 8787);
 
@@ -1440,6 +1441,10 @@ app.get(/^\/(?!api).*/, (_req, res) => {
   res.sendFile(path.join(rootDir, "dist", "index.html"));
 });
 
-app.listen(port, () => {
-  console.log(`AI code generator listening on http://127.0.0.1:${port}`);
-});
+if (isDirectRun) {
+  app.listen(port, () => {
+    console.log(`AI code generator listening on http://127.0.0.1:${port}`);
+  });
+}
+
+export default app;
