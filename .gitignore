@@ -6,5 +6,6 @@ qa-*.png
 .sandbox-runs/
 .apk-runs/
 .agent-e2e/
+.agent-usage/
 
 .vercel

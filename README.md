@@ -21,6 +21,14 @@
 
 这不是强隔离虚拟机，只是一个本地受控执行层。不要在里面运行你不信任的高风险代码。
 
+## 使用记录
+
+Agent 会记录生成、沙箱检查和 APK 打包事件，方便后续排查其他用户遇到的问题。记录保存在 `.agent-usage/events.jsonl`，页面左侧的 `使用记录` 卡片会显示最近事件。
+
+记录会包含：时间、操作类型、成功/失败、浏览器 session、IP 哈希、User-Agent、需求摘要、生成文件路径和大小、runId、失败步骤、错误摘要。不会保存 DeepSeek API Key、token、完整源码内容或 `.env`。
+
+在 Vercel Serverless 上，本地文件日志不是持久存储。正式多人使用时建议把这些事件接到数据库、对象存储或 Vercel Log Drain。
+
 针对 Node.js + Express 后端，生成器还会要求：
 
 - `app.js` 只创建并导出 app，`server.js` 单独负责 `app.listen()`。

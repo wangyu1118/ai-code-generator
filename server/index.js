@@ -14,6 +14,13 @@ import {
   makeCommentedMockTestContent,
   normalizeCommentMode
 } from "./commentPolicy.js";
+import {
+  appendUsageEvent,
+  buildRequestActor,
+  readUsageEvents,
+  summarizeGeneratedFiles,
+  summarizeSteps
+} from "./usageLog.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -28,6 +35,7 @@ const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com";
 const DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash";
 const SANDBOX_ROOT = path.join(rootDir, ".sandbox-runs");
 const APK_ROOT = path.join(rootDir, ".apk-runs");
+const USAGE_LOG_FILE = process.env.AGENT_USAGE_LOG_FILE || path.join(rootDir, ".agent-usage", "events.jsonl");
 const MAX_SANDBOX_FILES = 80;
 const MAX_SANDBOX_TOTAL_BYTES = 600_000;
 const MAX_SANDBOX_FILE_BYTES = 140_000;
@@ -1063,7 +1071,29 @@ app.get("/api/project-library", (_req, res) => {
   });
 });
 
+app.get("/api/usage/events", async (req, res) => {
+  try {
+    const events = await readUsageEvents(USAGE_LOG_FILE, { limit: req.query.limit });
+    res.json({
+      ok: true,
+      events,
+      storage: process.env.VERCEL ? "serverless-ephemeral" : "local-jsonl",
+      note: process.env.VERCEL
+        ? "Vercel serverless file logs are ephemeral. Use a database or log drain for durable multi-user production history."
+        : "Local records are stored in .agent-usage/events.jsonl."
+    });
+  } catch (error) {
+    res.status(500).json({
+      ok: false,
+      error: "读取使用记录失败。",
+      detail: error instanceof Error ? error.message : String(error)
+    });
+  }
+});
+
 app.post("/api/generate", async (req, res) => {
+  const startedAt = Date.now();
+  const actor = buildRequestActor(req);
   const brief = cleanString(req.body.brief);
   const language = cleanString(req.body.language, "JavaScript");
   const framework = cleanString(req.body.framework, "React + Vite");
@@ -1078,12 +1108,37 @@ app.post("/api/generate", async (req, res) => {
   const baseURL = normalizeDeepSeekBaseUrl(req.body.baseUrl || process.env.DEEPSEEK_BASE_URL);
 
   if (!brief) {
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "generate",
+      status: "failed",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: { reason: "empty brief" }
+    }).catch(() => {});
     res.status(400).json({ error: "请先输入你想生成的软件需求。" });
     return;
   }
 
   if (!apiKey) {
-    res.json(makeMockResult({ brief, language, framework, includeTests, commentMode }));
+    const result = makeMockResult({ brief, language, framework, includeTests, commentMode });
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "generate",
+      status: "ok",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: {
+        mode: "mock",
+        brief: brief.slice(0, 500),
+        language,
+        framework,
+        agentMode,
+        includeTests,
+        commentMode,
+        title: result.title,
+        files: summarizeGeneratedFiles(result.files)
+      }
+    }).catch(() => {});
+    res.json(result);
     return;
   }
 
@@ -1382,6 +1437,26 @@ app.post("/api/generate", async (req, res) => {
         result.notes = [...result.notes, ...review.findings.map((finding) => `Agent 自检：${finding}`)];
       }
 
+      await appendUsageEvent(USAGE_LOG_FILE, {
+        type: "generate",
+        status: "ok",
+        actor,
+        durationMs: Date.now() - startedAt,
+        detail: {
+          mode: "deepseek",
+          brief: brief.slice(0, 500),
+          language,
+          framework,
+          agentMode,
+          includeTests,
+          commentMode,
+          model,
+          baseURL,
+          title: result.title,
+          files: summarizeGeneratedFiles(result.files),
+          selfCheckCount: result.selfCheck?.length || 0
+        }
+      }).catch(() => {});
       res.json(result);
       return;
     }
@@ -1396,9 +1471,44 @@ app.post("/api/generate", async (req, res) => {
     }));
 
     result.notes = ["Agent 注释能力：已启用段落级代码注释。", ...result.notes];
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "generate",
+      status: "ok",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: {
+        mode: "deepseek",
+        brief: brief.slice(0, 500),
+        language,
+        framework,
+        agentMode,
+        includeTests,
+        commentMode,
+        model,
+        baseURL,
+        title: result.title,
+        files: summarizeGeneratedFiles(result.files)
+      }
+    }).catch(() => {});
     res.json(result);
   } catch (error) {
     console.error(error);
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "generate",
+      status: "failed",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: {
+        brief: brief.slice(0, 500),
+        language,
+        framework,
+        agentMode,
+        includeTests,
+        commentMode,
+        model,
+        error: error instanceof Error ? error.message : String(error)
+      }
+    }).catch(() => {});
     res.status(500).json({
       error: "生成失败，请检查 DeepSeek API Key、模型名称或网络连接。",
       detail: error instanceof Error ? error.message : String(error)
@@ -1407,12 +1517,36 @@ app.post("/api/generate", async (req, res) => {
 });
 
 app.post("/api/sandbox/run", async (req, res) => {
+  const startedAt = Date.now();
+  const actor = buildRequestActor(req);
   try {
     const allowInstall = Boolean(req.body.allowInstall);
     const files = Array.isArray(req.body.files) ? req.body.files : [];
     const result = await runSandboxChecks({ files, allowInstall });
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "sandbox.run",
+      status: result.ok ? "ok" : "failed",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: {
+        allowInstall,
+        files: summarizeGeneratedFiles(files),
+        runId: result.runId,
+        runDir: result.runDir,
+        warnings: result.warnings,
+        steps: summarizeSteps(result.steps),
+        error: result.error
+      }
+    }).catch(() => {});
     res.json(result);
   } catch (error) {
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "sandbox.run",
+      status: "failed",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: { error: error instanceof Error ? error.message : String(error) }
+    }).catch(() => {});
     res.status(400).json({
       ok: false,
       error: "沙箱执行失败。",
@@ -1422,12 +1556,38 @@ app.post("/api/sandbox/run", async (req, res) => {
 });
 
 app.post("/api/apk/package", async (req, res) => {
+  const startedAt = Date.now();
+  const actor = buildRequestActor(req);
   try {
     const allowInstall = Boolean(req.body.allowInstall);
     const files = Array.isArray(req.body.files) ? req.body.files : [];
     const result = await runApkPackaging({ files, allowInstall });
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "apk.package",
+      status: result.ok ? "ok" : "failed",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: {
+        allowInstall,
+        files: summarizeGeneratedFiles(files),
+        runId: result.runId,
+        runDir: result.runDir,
+        strategy: result.strategy,
+        apkFiles: result.apkFiles,
+        warnings: result.warnings,
+        steps: summarizeSteps(result.steps),
+        error: result.error
+      }
+    }).catch(() => {});
     res.json(result);
   } catch (error) {
+    await appendUsageEvent(USAGE_LOG_FILE, {
+      type: "apk.package",
+      status: "failed",
+      actor,
+      durationMs: Date.now() - startedAt,
+      detail: { error: error instanceof Error ? error.message : String(error) }
+    }).catch(() => {});
     res.status(400).json({
       ok: false,
       error: "APK 打包失败。",

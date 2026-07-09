@@ -10,6 +10,7 @@ import {
   Download,
   FileCode2,
   Github,
+  History,
   KeyRound,
   Loader2,
   MessageSquareText,
@@ -34,6 +35,31 @@ const deepSeekModels = ["deepseek-v4-flash", "deepseek-v4-pro"];
 
 function classNames(...items) {
   return items.filter(Boolean).join(" ");
+}
+
+function getAgentSessionId() {
+  const storageKey = "agent-session-id";
+  const existing = localStorage.getItem(storageKey);
+  if (existing) return existing;
+  const next = `session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  localStorage.setItem(storageKey, next);
+  return next;
+}
+
+function requestHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "X-Agent-Session-Id": getAgentSessionId()
+  };
+}
+
+function formatUsageTime(value) {
+  if (!value) return "";
+  try {
+    return new Date(value).toLocaleString();
+  } catch {
+    return value;
+  }
 }
 
 function loadApiSettings() {
@@ -111,7 +137,50 @@ function ApiSettingsDialog({ open, settings, onChange, onClose, onSave }) {
   );
 }
 
-function Sidebar({ apiSettings, allowSandboxInstall, setAllowSandboxInstall, onOpenApiSettings, projectLibrary }) {
+function UsageHistory({ events, note, onRefresh }) {
+  return (
+    <section className="sidebar-card usage-card">
+      <div className="mini-title">
+        <History size={15} />
+        使用记录
+      </div>
+      <p>{note || "记录生成、沙箱和 APK 打包结果，方便后续排查问题。"}</p>
+      <button type="button" onClick={onRefresh}>
+        刷新记录
+      </button>
+      {events?.length ? (
+        <div className="usage-list">
+          {events.slice(0, 6).map((event) => (
+            <article className="usage-item" key={event.id}>
+              <div>
+                <span className={classNames("usage-status", event.status)}>{event.status}</span>
+                <strong>{event.type}</strong>
+              </div>
+              <p>{event.detail?.brief || event.detail?.error || event.detail?.title || event.detail?.runId || "已记录一次操作"}</p>
+              <small>
+                {formatUsageTime(event.createdAt)}
+                {event.actor?.sessionId ? ` · ${event.actor.sessionId}` : ""}
+              </small>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p>暂无记录。</p>
+      )}
+    </section>
+  );
+}
+
+function Sidebar({
+  apiSettings,
+  allowSandboxInstall,
+  setAllowSandboxInstall,
+  onOpenApiSettings,
+  projectLibrary,
+  usageEvents,
+  usageNote,
+  onRefreshUsage
+}) {
   const libraryCategories = Array.from(new Set((projectLibrary || []).map((project) => project.category))).slice(0, 3);
 
   return (
@@ -173,6 +242,8 @@ function Sidebar({ apiSettings, allowSandboxInstall, setAllowSandboxInstall, onO
         </div>
         <p>默认给每个生成文件加入段落级注释，说明每个逻辑代码块负责什么。</p>
       </section>
+
+      <UsageHistory events={usageEvents} note={usageNote} onRefresh={onRefreshUsage} />
 
       <section className="sidebar-card">
         <div className="mini-title">
@@ -560,6 +631,8 @@ function App() {
   const [apiDialogOpen, setApiDialogOpen] = useState(false);
   const [apiSettings, setApiSettings] = useState(loadApiSettings);
   const [projectLibrary, setProjectLibrary] = useState([]);
+  const [usageEvents, setUsageEvents] = useState([]);
+  const [usageNote, setUsageNote] = useState("");
 
   const selectedFile = useMemo(() => {
     if (!result?.files?.length) return null;
@@ -589,6 +662,23 @@ function App() {
     };
   }, []);
 
+  async function refreshUsageEvents() {
+    try {
+      const response = await fetch("/api/usage/events?limit=80");
+      const payload = await response.json();
+      if (Array.isArray(payload.events)) {
+        setUsageEvents(payload.events);
+      }
+      setUsageNote(payload.note || "");
+    } catch {
+      setUsageNote("使用记录暂时不可用。");
+    }
+  }
+
+  useEffect(() => {
+    refreshUsageEvents();
+  }, []);
+
   function saveApiSettings() {
     localStorage.setItem("deepseek-api-settings", JSON.stringify(apiSettings));
     setApiDialogOpen(false);
@@ -608,7 +698,7 @@ function App() {
     try {
       const response = await fetch("/api/generate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders(),
         body: JSON.stringify({
           brief: prompt,
           language: "auto",
@@ -632,10 +722,12 @@ function App() {
 
       setResult(payload);
       setActiveFile(payload.files?.[0]?.path || "");
+      refreshUsageEvents();
     } catch (err) {
       setError(err instanceof Error ? err.message : "生成失败");
     } finally {
       setLoading(false);
+      refreshUsageEvents();
     }
   }
 
@@ -664,7 +756,7 @@ function App() {
     try {
       const response = await fetch("/api/sandbox/run", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders(),
         body: JSON.stringify({
           files: result.files,
           allowInstall: allowSandboxInstall
@@ -677,6 +769,7 @@ function App() {
       }
 
       setSandboxResult(payload);
+      refreshUsageEvents();
     } catch (err) {
       setSandboxResult({
         ok: false,
@@ -686,6 +779,7 @@ function App() {
       });
     } finally {
       setSandboxRunning(false);
+      refreshUsageEvents();
     }
   }
 
@@ -697,7 +791,7 @@ function App() {
     try {
       const response = await fetch("/api/apk/package", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: requestHeaders(),
         body: JSON.stringify({
           files: result.files,
           allowInstall: allowSandboxInstall
@@ -710,6 +804,7 @@ function App() {
       }
 
       setApkResult(payload);
+      refreshUsageEvents();
     } catch (err) {
       setApkResult({
         ok: false,
@@ -720,6 +815,7 @@ function App() {
       });
     } finally {
       setApkRunning(false);
+      refreshUsageEvents();
     }
   }
 
@@ -739,6 +835,9 @@ function App() {
         setAllowSandboxInstall={setAllowSandboxInstall}
         onOpenApiSettings={() => setApiDialogOpen(true)}
         projectLibrary={projectLibrary}
+        usageEvents={usageEvents}
+        usageNote={usageNote}
+        onRefreshUsage={refreshUsageEvents}
       />
 
       <ChatWindow

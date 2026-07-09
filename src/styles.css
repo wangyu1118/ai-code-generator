@@ -189,6 +189,71 @@ button {
   white-space: nowrap;
 }
 
+.usage-card {
+  max-height: 280px;
+  overflow: hidden;
+}
+
+.usage-list {
+  display: grid;
+  gap: 8px;
+  max-height: 158px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.usage-item {
+  display: grid;
+  gap: 4px;
+  border: 1px solid #2e3032;
+  border-radius: 8px;
+  padding: 8px;
+  background: #151617;
+}
+
+.usage-item div {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.usage-item strong,
+.usage-item p,
+.usage-item small {
+  overflow-wrap: anywhere;
+}
+
+.usage-item strong {
+  color: #eeeeec;
+  font-size: 12px;
+}
+
+.usage-item p,
+.usage-item small {
+  margin: 0;
+  color: #aeb1ad;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.usage-status {
+  border-radius: 999px;
+  padding: 2px 6px;
+  color: #161716;
+  background: #c8cac5;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.usage-status.ok {
+  background: #63d489;
+}
+
+.usage-status.failed {
+  background: #ff9b8c;
+}
+
 .sidebar-card p,
 .sidebar-note p {
   font-size: 13px;
