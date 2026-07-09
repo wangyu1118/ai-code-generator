@@ -9,4 +9,5 @@ qa-*.png
 .apk-runs/
 .agent-e2e/
 .agent-usage/
+.agent-monitor/
 .vercel/

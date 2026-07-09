@@ -1103,6 +1103,7 @@ app.post("/api/generate", async (req, res) => {
   const agentMode = Boolean(req.body.agentMode);
   const includeTests = Boolean(req.body.includeTests);
   const commentMode = normalizeCommentMode(req.body.commentMode);
+  const forceMock = req.body.forceMock === true;
   const apiKey = cleanString(req.body.apiKey, process.env.DEEPSEEK_API_KEY || "");
   const model = cleanString(req.body.model, process.env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL);
   const baseURL = normalizeDeepSeekBaseUrl(req.body.baseUrl || process.env.DEEPSEEK_BASE_URL);
@@ -1119,7 +1120,7 @@ app.post("/api/generate", async (req, res) => {
     return;
   }
 
-  if (!apiKey) {
+  if (forceMock || !apiKey) {
     const result = makeMockResult({ brief, language, framework, includeTests, commentMode });
     await appendUsageEvent(USAGE_LOG_FILE, {
       type: "generate",
@@ -1128,6 +1129,7 @@ app.post("/api/generate", async (req, res) => {
       durationMs: Date.now() - startedAt,
       detail: {
         mode: "mock",
+        forceMock,
         brief: brief.slice(0, 500),
         language,
         framework,

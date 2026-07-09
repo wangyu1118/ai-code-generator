@@ -87,3 +87,32 @@ src/main.jsx      React 前端
 src/styles.css    页面样式
 vite.config.js    Vite 配置与 API 代理
 ```
+
+## Agent Monitor
+
+Use the monitor when you want Codex or CI to keep checking whether the local agent is healthy:
+
+```bash
+npm run monitor:agent
+```
+
+The monitor writes its latest report to `.agent-monitor/latest.json` and exits with a non-zero code when a required check fails. Current required checks cover:
+
+- `GET /api/health`
+- `GET /api/usage/events?limit=5`
+- `POST /api/generate` in forced mock mode, so the smoke test does not spend DeepSeek tokens or depend on external latency
+- `POST /api/sandbox/run` with a small JavaScript syntax smoke file
+
+Optional production checks can be enabled with:
+
+```bash
+AGENT_MONITOR_PRODUCTION_URL=https://your-vercel-url.example npm run monitor:agent
+```
+
+Environment variables:
+
+- `AGENT_MONITOR_LOCAL_URL`: local app URL, default `http://127.0.0.1:8787`
+- `AGENT_MONITOR_PRODUCTION_URL`: optional deployed URL
+- `AGENT_MONITOR_REPORT`: custom report path
+
+If a Vercel preview is protected and returns `401`, production checks are reported as optional failures while local required checks still decide the command exit code.
