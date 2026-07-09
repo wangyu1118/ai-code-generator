@@ -168,6 +168,14 @@ function Sidebar({ apiSettings, allowSandboxInstall, setAllowSandboxInstall, onO
 
       <section className="sidebar-card">
         <div className="mini-title">
+          <FileCode2 size={15} />
+          自动注释
+        </div>
+        <p>默认给每个生成文件加入段落级注释，说明每个逻辑代码块负责什么。</p>
+      </section>
+
+      <section className="sidebar-card">
+        <div className="mini-title">
           <Github size={15} />
           GitHub 能力库
         </div>
@@ -610,6 +618,7 @@ function App() {
           qualityMode: "realistic production",
           agentMode: true,
           includeTests: true,
+          commentMode: "section",
           apiKey: apiSettings.apiKey,
           model: apiSettings.model,
           baseUrl: apiSettings.baseUrl

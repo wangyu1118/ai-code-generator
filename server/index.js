@@ -6,6 +6,14 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  buildCommentPolicyInstructions,
+  buildCommentSafetyRequirements,
+  hasCommentCoverageFinding,
+  makeCommentedMockContent,
+  makeCommentedMockTestContent,
+  normalizeCommentMode
+} from "./commentPolicy.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -128,14 +136,16 @@ function inferMockStack({ brief, language, framework }) {
   return { language: "JavaScript", framework: "Node.js + Express" };
 }
 
-function makeMockResult({ brief, language, framework, includeTests }) {
+function makeMockResult({ brief, language, framework, includeTests, commentMode }) {
   const inferred = inferMockStack({ brief, language, framework });
   const lang = !language || language === "auto" ? inferred.language : language;
   const chosenFramework = !framework || framework === "auto" ? inferred.framework : framework;
   const filePath = lang.toLowerCase().includes("python") ? "main.py" : "src/main.js";
-  const content = lang.toLowerCase().includes("python")
-    ? `def main():\n    print("Hello from your generated app")\n\n\nif __name__ == "__main__":\n    main()\n`
-    : `export function run() {\n  console.log("Hello from your generated app");\n}\n\nrun();\n`;
+  const content = normalizeCommentMode(commentMode) === "off"
+    ? lang.toLowerCase().includes("python")
+      ? `def main():\n    print("Hello from your generated app")\n\n\nif __name__ == "__main__":\n    main()\n`
+      : `export function run() {\n  console.log("Hello from your generated app");\n}\n\nrun();\n`
+    : makeCommentedMockContent(lang);
 
   const files = [
     {
@@ -150,9 +160,10 @@ function makeMockResult({ brief, language, framework, includeTests }) {
     files.push({
       path: lang.toLowerCase().includes("python") ? "test_main.py" : "src/main.test.js",
       language: lang,
-      content: lang.toLowerCase().includes("python")
+      content: normalizeCommentMode(commentMode) === "off" ? lang.toLowerCase().includes("python")
         ? `from main import main\n\n\ndef test_main_exists():\n    assert callable(main)\n`
-        : `import { run } from "./main.js";\n\ntest("run exists", () => {\n  expect(typeof run).toBe("function");\n});\n`,
+        : `import { run } from "./main.js";\n\ntest("run exists", () => {\n  expect(typeof run).toBe("function");\n});\n`
+        : makeCommentedMockTestContent(lang),
       explanation: "简单测试骨架，接入真实测试框架后可继续扩展。"
     });
   }
@@ -162,7 +173,7 @@ function makeMockResult({ brief, language, framework, includeTests }) {
     summary: `当前没有检测到 DeepSeek API Key，因此返回本地模拟结果。Agent 已根据需求自动选择 ${chosenFramework || lang}。`,
     files,
     commands: lang.toLowerCase().includes("python") ? ["python main.py"] : ["node src/main.js"],
-    notes: ["打开 API 设置，填入 DeepSeek API Key 后再生成。"],
+    notes: ["打开 API 设置，填入 DeepSeek API Key 后再生成。", "Agent 注释能力：已启用段落级代码注释。"],
     agentTrace: [
       { step: "分析需求", status: "done", detail: `已读取需求：${brief.slice(0, 80)}` },
       { step: "选择技术栈", status: "done", detail: `模拟模式下选择 ${chosenFramework || lang}。` },
@@ -170,7 +181,7 @@ function makeMockResult({ brief, language, framework, includeTests }) {
       { step: "生成代码", status: "done", detail: includeTests ? "已包含测试骨架。" : "已生成核心实现。" },
       { step: "自检", status: "done", detail: "真实自检需要启用 DeepSeek API Key。" }
     ],
-    selfCheck: ["模拟模式仅验证界面流程。", "真实 Agent 模式会执行规划、生成和自检三段流程。"]
+    selfCheck: ["模拟模式仅验证界面流程。", "真实 Agent 模式会执行规划、生成和自检三段流程。", "段落级注释已覆盖主要代码块。"]
   };
 }
 
@@ -1060,6 +1071,7 @@ app.post("/api/generate", async (req, res) => {
   const qualityMode = cleanString(req.body.qualityMode, "realistic production");
   const agentMode = Boolean(req.body.agentMode);
   const includeTests = Boolean(req.body.includeTests);
+  const commentMode = normalizeCommentMode(req.body.commentMode);
   const apiKey = cleanString(req.body.apiKey, process.env.DEEPSEEK_API_KEY || "");
   const model = cleanString(req.body.model, process.env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL);
   const baseURL = normalizeDeepSeekBaseUrl(req.body.baseUrl || process.env.DEEPSEEK_BASE_URL);
@@ -1070,7 +1082,7 @@ app.post("/api/generate", async (req, res) => {
   }
 
   if (!apiKey) {
-    res.json(makeMockResult({ brief, language, framework, includeTests }));
+    res.json(makeMockResult({ brief, language, framework, includeTests, commentMode }));
     return;
   }
 
@@ -1100,6 +1112,7 @@ app.post("/api/generate", async (req, res) => {
     "- For Docker requests, include Dockerfile and compose.yaml when the user asks for compose or multi-service local running.",
     "- For Terraform requests, include main.tf, variables.tf, outputs.tf, and an example or usage note when practical.",
     "Avoid unsafe destructive commands. Do not invent secrets or credentials.",
+    buildCommentPolicyInstructions(commentMode),
     "You are embedded in a Codex-like agent UI. The user only provides natural-language requirements.",
     "When language, framework, outputKind, or style are 'auto' or 'agent-selected', infer the best language, framework, project structure, and output shape from the user's requirements.",
     "Make the selected stack visible in the summary, agentTrace, notes, or file languages. Do not ask the user to choose a code type unless the requirement is genuinely ambiguous.",
@@ -1153,6 +1166,7 @@ app.post("/api/generate", async (req, res) => {
       outputKind,
       qualityMode,
       agentMode,
+      commentMode,
       routingInstruction:
         "Choose the best implementation stack yourself. The UI has intentionally hidden language/framework/output-type selectors.",
       githubProjectLibrary: GITHUB_PROJECT_LIBRARY.map((project) => ({
@@ -1171,6 +1185,7 @@ app.post("/api/generate", async (req, res) => {
         "For Express APIs, split app.js from server.js so tests can import app without listening on a port.",
         "For ticket or inventory backends, use auth-derived user identity, max quantity limits, duplicate-order prevention, restricted CORS, rate limiting, and classified HTTP errors.",
         "When tests are requested, output test files before implementation files and include concurrency/no-oversell tests.",
+        ...buildCommentSafetyRequirements(commentMode),
         "Include a self-check checklist in notes.",
         "Call out limitations in notes."
       ],
@@ -1227,6 +1242,7 @@ app.post("/api/generate", async (req, res) => {
                 "Return JSON only with title, summary, files, commands, notes, agentTrace, selfCheck.",
                 "Keep the result compact: at most 7 files, short file contents, no exhaustive boilerplate.",
                 "If includeTests is true, output test files before implementation files.",
+                "Apply the code comment policy to every generated file.",
                 JSON.stringify({ request: JSON.parse(userPrompt), agentPlan: plan }, null, 2)
               ].join("\n\n")
             }
@@ -1247,6 +1263,7 @@ app.post("/api/generate", async (req, res) => {
                 "Retry with an emergency compact project: at most 5 files, at most 90 lines per file.",
                 "Return JSON only with title, summary, files, commands, notes, agentTrace, selfCheck.",
                 "Prefer a runnable vertical slice with tests over a large scaffold.",
+                "Apply the code comment policy to every generated file.",
                 JSON.stringify({ request: JSON.parse(userPrompt), agentPlan: plan }, null, 2)
               ].join("\n\n")
             }
@@ -1271,6 +1288,7 @@ app.post("/api/generate", async (req, res) => {
               role: "user",
               content: [
                 "Review this generated result against the guardrails. Return JSON only.",
+                "Also verify that every generated source and test file has useful section-level comments.",
                 "Schema: {\"passed\":boolean,\"findings\":[\"string\"],\"checklist\":[\"string\"]}.",
                 JSON.stringify(generated, null, 2)
               ].join("\n\n")
@@ -1294,7 +1312,8 @@ app.post("/api/generate", async (req, res) => {
           text.includes("failed") ||
           text.includes("test") ||
           text.includes("entry") ||
-          text.includes("dependency")
+          text.includes("dependency") ||
+          hasCommentCoverageFinding(text)
         );
       });
 
@@ -1313,7 +1332,7 @@ app.post("/api/generate", async (req, res) => {
                 content: [
                   "Fix the generated project according to the self-review findings.",
                   "Return the complete corrected JSON only with title, summary, files, commands, notes, agentTrace, selfCheck.",
-                  "Do not add a large scaffold. Correct only blocking issues such as contradictory tests, missing entry files, missing package dependencies, or invalid commands.",
+                  "Do not add a large scaffold. Correct only blocking issues such as contradictory tests, missing entry files, missing package dependencies, missing section-level comments, or invalid commands.",
                   JSON.stringify({ generated, review }, null, 2)
                 ].join("\n\n")
               }
@@ -1341,6 +1360,7 @@ app.post("/api/generate", async (req, res) => {
       }
 
       const result = normalizeGeneratedResult(finalGenerated);
+      result.notes = ["Agent 注释能力：已启用段落级代码注释。", ...result.notes];
       const planSteps = Array.isArray(plan.steps) ? plan.steps : [];
       result.agentTrace = [
         { step: "分析需求", status: "done", detail: cleanString(plan.goal, brief.slice(0, 120)) },
@@ -1365,16 +1385,17 @@ app.post("/api/generate", async (req, res) => {
       return;
     }
 
-    const result = await createJsonCompletion({
+    const result = normalizeGeneratedResult(await createJsonCompletion({
       client,
       model,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt }
       ]
-    });
+    }));
 
-    res.json(normalizeGeneratedResult(result));
+    result.notes = ["Agent 注释能力：已启用段落级代码注释。", ...result.notes];
+    res.json(result);
   } catch (error) {
     console.error(error);
     res.status(500).json({
