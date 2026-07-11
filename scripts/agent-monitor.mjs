@@ -140,12 +140,20 @@ export function targetResultIsOk(target, status, json) {
   return true;
 }
 
-async function runTarget(target) {
+export async function runTarget(
+  target,
+  {
+    fetchImpl = fetch,
+    timeoutMs = 20_000,
+    setTimeoutImpl = setTimeout,
+    clearTimeoutImpl = clearTimeout
+  } = {}
+) {
   const startedAt = Date.now();
+  const controller = new AbortController();
+  const timeout = setTimeoutImpl(() => controller.abort(new Error(`${target.name} timed out`)), timeoutMs);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(new Error(`${target.name} timed out`)), 20_000);
-    const response = await fetch(target.url, {
+    const response = await fetchImpl(target.url, {
       method: target.method,
       headers: {
         "Content-Type": "application/json",
@@ -154,7 +162,6 @@ async function runTarget(target) {
       body: target.body ? JSON.stringify(target.body) : undefined,
       signal: controller.signal
     });
-    clearTimeout(timeout);
 
     const text = await response.text();
     let json = null;
@@ -190,6 +197,8 @@ async function runTarget(target) {
       durationMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : String(error)
     };
+  } finally {
+    clearTimeoutImpl(timeout);
   }
 }
 

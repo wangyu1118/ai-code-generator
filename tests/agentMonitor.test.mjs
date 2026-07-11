@@ -7,6 +7,7 @@ import {
   createMonitorReport,
   isDirectRunPath,
   redactMonitorUrl,
+  runTarget,
   targetResultIsOk
 } from "../scripts/agent-monitor.mjs";
 
@@ -57,6 +58,30 @@ test("isDirectRunPath handles Windows script paths", () => {
 test("targetResultIsOk treats JSON ok false as a failed check", () => {
   assert.equal(targetResultIsOk({ expectStatus: 200 }, 200, { ok: false }), false);
   assert.equal(targetResultIsOk({ expectStatus: 200 }, 200, { ok: true }), true);
+});
+
+test("runTarget clears its timeout when fetch rejects immediately", async () => {
+  const scheduled = Symbol("scheduled-timeout");
+  const cleared = [];
+  const result = await runTarget(
+    {
+      name: "local.health",
+      required: true,
+      method: "GET",
+      url: "http://127.0.0.1:8787/api/health",
+      expectStatus: 200
+    },
+    {
+      fetchImpl: async () => {
+        throw new Error("connection refused");
+      },
+      setTimeoutImpl: () => scheduled,
+      clearTimeoutImpl: (timer) => cleared.push(timer)
+    }
+  );
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(cleared, [scheduled]);
 });
 
 test("classifyCheckResults marks report failed when any required check fails", () => {

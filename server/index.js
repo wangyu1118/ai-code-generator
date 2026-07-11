@@ -1094,19 +1094,20 @@ app.get("/api/usage/events", async (req, res) => {
 app.post("/api/generate", async (req, res) => {
   const startedAt = Date.now();
   const actor = buildRequestActor(req);
-  const brief = cleanString(req.body.brief);
-  const language = cleanString(req.body.language, "JavaScript");
-  const framework = cleanString(req.body.framework, "React + Vite");
-  const style = cleanString(req.body.style, "production-ready");
-  const outputKind = cleanString(req.body.outputKind, "complete feature");
-  const qualityMode = cleanString(req.body.qualityMode, "realistic production");
-  const agentMode = Boolean(req.body.agentMode);
-  const includeTests = Boolean(req.body.includeTests);
-  const commentMode = normalizeCommentMode(req.body.commentMode);
-  const forceMock = req.body.forceMock === true;
-  const apiKey = cleanString(req.body.apiKey, process.env.DEEPSEEK_API_KEY || "");
-  const model = cleanString(req.body.model, process.env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL);
-  const baseURL = normalizeDeepSeekBaseUrl(req.body.baseUrl || process.env.DEEPSEEK_BASE_URL);
+  const body = req.body && typeof req.body === "object" ? req.body : {};
+  const brief = cleanString(body.brief);
+  const language = cleanString(body.language, "JavaScript");
+  const framework = cleanString(body.framework, "React + Vite");
+  const style = cleanString(body.style, "production-ready");
+  const outputKind = cleanString(body.outputKind, "complete feature");
+  const qualityMode = cleanString(body.qualityMode, "realistic production");
+  const agentMode = Boolean(body.agentMode);
+  const includeTests = Boolean(body.includeTests);
+  const commentMode = normalizeCommentMode(body.commentMode);
+  const forceMock = body.forceMock === true;
+  const apiKey = cleanString(body.apiKey, process.env.DEEPSEEK_API_KEY || "");
+  const model = cleanString(body.model, process.env.DEEPSEEK_MODEL || DEFAULT_DEEPSEEK_MODEL);
+  const baseURL = normalizeDeepSeekBaseUrl(body.baseUrl || process.env.DEEPSEEK_BASE_URL);
 
   if (!brief) {
     await appendUsageEvent(USAGE_LOG_FILE, {
