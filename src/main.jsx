@@ -23,6 +23,12 @@ import {
   X
 } from "lucide-react";
 import "./styles.css";
+import {
+  limitConversationHistory,
+  loadConversationHistory,
+  prepareConversationSubmission,
+  saveConversationHistory
+} from "./conversationStore.js";
 
 const starterPrompts = [
   "做一个待办清单网页，支持新增、完成、筛选和本地保存",
@@ -171,12 +177,51 @@ function UsageHistory({ events, note, onRefresh }) {
   );
 }
 
+function ConversationHistory({ turns, activeTurnId, onSelect, onClear }) {
+  return (
+    <section className="sidebar-card conversation-card">
+      <div className="mini-title conversation-title">
+        <span>
+          <MessageSquareText size={15} />
+          对话记录
+        </span>
+        {turns.length ? (
+          <button type="button" onClick={onClear} title="清空本地对话记录">
+            <X size={14} />
+          </button>
+        ) : null}
+      </div>
+      {turns.length ? (
+        <div className="conversation-list">
+          {[...turns].reverse().map((turn) => (
+            <button
+              className={classNames("conversation-item", activeTurnId === turn.id && "active")}
+              key={turn.id}
+              type="button"
+              onClick={() => onSelect(turn.id)}
+            >
+              <strong>{turn.result?.title || turn.prompt}</strong>
+              <span>{formatUsageTime(turn.createdAt)} · {turn.status === "done" ? "已完成" : turn.status === "loading" ? "生成中" : "失败"}</span>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <p>暂无本地对话。</p>
+      )}
+    </section>
+  );
+}
+
 function Sidebar({
   apiSettings,
   allowSandboxInstall,
   setAllowSandboxInstall,
   onOpenApiSettings,
   projectLibrary,
+  conversationTurns,
+  activeTurnId,
+  onSelectConversation,
+  onClearConversations,
   usageEvents,
   usageNote,
   onRefreshUsage
@@ -242,6 +287,13 @@ function Sidebar({
         </div>
         <p>默认给每个生成文件加入段落级注释，说明每个逻辑代码块负责什么。</p>
       </section>
+
+      <ConversationHistory
+        turns={conversationTurns}
+        activeTurnId={activeTurnId}
+        onSelect={onSelectConversation}
+        onClear={onClearConversations}
+      />
 
       <UsageHistory events={usageEvents} note={usageNote} onRefresh={onRefreshUsage} />
 
@@ -498,8 +550,9 @@ function ResultCard({
 function ChatWindow({
   brief,
   setBrief,
-  lastPrompt,
-  result,
+  conversationTurns,
+  activeTurnId,
+  onSelectConversation,
   selectedFile,
   activeFile,
   setActiveFile,
@@ -536,7 +589,7 @@ function ChatWindow({
           </div>
           <div className="bubble">
             <p>告诉我你想做什么。无需选择语言、框架或代码类型，我会根据需求自动决定实现方式、文件结构、测试和运行命令。</p>
-            {!lastPrompt && !result ? (
+            {!conversationTurns.length ? (
               <div className="starter-row">
                 {starterPrompts.map((item) => (
                   <button key={item} type="button" onClick={() => setBrief(item)}>
@@ -548,49 +601,69 @@ function ChatWindow({
           </div>
         </div>
 
-        {lastPrompt ? (
-          <div className="message user">
-            <div className="bubble">
-              <p>{lastPrompt}</p>
+        {conversationTurns.map((turn) => (
+          <React.Fragment key={turn.id}>
+            <div className="message user">
+              <div className="bubble">
+                <p>{turn.prompt}</p>
+              </div>
             </div>
-          </div>
-        ) : null}
 
-        {loading ? (
-          <div className="message assistant">
-            <div className="avatar">
-              <Loader2 className="spin" size={16} />
-            </div>
-            <div className="bubble">
-              <p>Agent 正在分析需求、选择技术栈并生成代码...</p>
-            </div>
-          </div>
-        ) : null}
+            {turn.status === "loading" ? (
+              <div className="message assistant">
+                <div className="avatar">
+                  <Loader2 className="spin" size={16} />
+                </div>
+                <div className="bubble">
+                  <p>Agent 正在分析需求、选择技术栈并生成代码...</p>
+                </div>
+              </div>
+            ) : null}
 
-        {result ? (
-          <div className="message assistant">
-            <div className="avatar">
-              <Bot size={16} />
-            </div>
-            <div className="bubble full">
-              <ResultCard
-                result={result}
-                selectedFile={selectedFile}
-                activeFile={activeFile}
-                setActiveFile={setActiveFile}
-                copied={copied}
-                onCopy={onCopy}
-                onDownload={onDownload}
-                sandboxRunning={sandboxRunning}
-                sandboxResult={sandboxResult}
-                onRunSandbox={onRunSandbox}
-                apkRunning={apkRunning}
-                apkResult={apkResult}
-                onPackageApk={onPackageApk}
-              />
-            </div>
-          </div>
-        ) : null}
+            {turn.status === "error" ? (
+              <div className="message assistant">
+                <div className="avatar">
+                  <AlertTriangle size={16} />
+                </div>
+                <div className="bubble error-bubble">
+                  <p>{turn.error || "生成失败"}</p>
+                </div>
+              </div>
+            ) : null}
+
+            {turn.result ? (
+              <div className="message assistant">
+                <div className="avatar">
+                  <Bot size={16} />
+                </div>
+                {turn.id === activeTurnId ? (
+                  <div className="bubble full">
+                    <ResultCard
+                      result={turn.result}
+                      selectedFile={selectedFile}
+                      activeFile={activeFile}
+                      setActiveFile={setActiveFile}
+                      copied={copied}
+                      onCopy={onCopy}
+                      onDownload={onDownload}
+                      sandboxRunning={sandboxRunning}
+                      sandboxResult={sandboxResult}
+                      onRunSandbox={onRunSandbox}
+                      apkRunning={apkRunning}
+                      apkResult={apkResult}
+                      onPackageApk={onPackageApk}
+                    />
+                  </div>
+                ) : (
+                  <button className="archived-result" type="button" onClick={() => onSelectConversation(turn.id)}>
+                    <strong>{turn.result.title}</strong>
+                    <span>{turn.result.summary}</span>
+                  </button>
+                )}
+              </div>
+            ) : null}
+          </React.Fragment>
+        ))}
       </div>
 
       <footer className="composer">
@@ -617,9 +690,12 @@ function ChatWindow({
 
 function App() {
   const [brief, setBrief] = useState("");
-  const [lastPrompt, setLastPrompt] = useState("");
+  const [conversationTurns, setConversationTurns] = useState(loadConversationHistory);
+  const [activeTurnId, setActiveTurnId] = useState(() => {
+    const restored = loadConversationHistory();
+    return [...restored].reverse().find((turn) => turn.result)?.id || "";
+  });
   const [allowSandboxInstall, setAllowSandboxInstall] = useState(false);
-  const [result, setResult] = useState(null);
   const [activeFile, setActiveFile] = useState("");
   const [loading, setLoading] = useState(false);
   const [sandboxRunning, setSandboxRunning] = useState(false);
@@ -634,10 +710,26 @@ function App() {
   const [usageEvents, setUsageEvents] = useState([]);
   const [usageNote, setUsageNote] = useState("");
 
+  const activeTurn = useMemo(() => {
+    return conversationTurns.find((turn) => turn.id === activeTurnId) || null;
+  }, [activeTurnId, conversationTurns]);
+  const result = activeTurn?.result || null;
+
   const selectedFile = useMemo(() => {
     if (!result?.files?.length) return null;
     return result.files.find((file) => file.path === activeFile) || result.files[0];
   }, [activeFile, result]);
+
+  useEffect(() => {
+    if (!result?.files?.length) return;
+    if (!result.files.some((file) => file.path === activeFile)) {
+      setActiveFile(result.files[0].path);
+    }
+  }, [activeFile, result]);
+
+  useEffect(() => {
+    saveConversationHistory(conversationTurns);
+  }, [conversationTurns]);
 
   useEffect(() => {
     let cancelled = false;
@@ -685,15 +777,19 @@ function App() {
   }
 
   async function generateCode() {
-    const prompt = brief.trim();
-    if (!prompt || loading) return;
+    const submission = prepareConversationSubmission(brief);
+    if (!submission || loading) return;
+    const { prompt, turn } = submission;
 
+    setBrief(submission.draft);
     setLoading(true);
     setError("");
     setCopied("");
     setSandboxResult(null);
     setApkResult(null);
-    setLastPrompt(prompt);
+    setActiveTurnId(turn.id);
+    setActiveFile("");
+    setConversationTurns((current) => limitConversationHistory([...current, turn]));
 
     try {
       const response = await fetch("/api/generate", {
@@ -720,15 +816,45 @@ function App() {
         throw new Error(payload.error || "生成失败");
       }
 
-      setResult(payload);
+      setConversationTurns((current) => current.map((item) => (
+        item.id === turn.id
+          ? { ...item, status: "done", result: payload, error: undefined }
+          : item
+      )));
+      setActiveTurnId(turn.id);
       setActiveFile(payload.files?.[0]?.path || "");
       refreshUsageEvents();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "生成失败");
+      const message = err instanceof Error ? err.message : "生成失败";
+      setConversationTurns((current) => current.map((item) => (
+        item.id === turn.id
+          ? { ...item, status: "error", error: message }
+          : item
+      )));
+      setError(message);
     } finally {
       setLoading(false);
       refreshUsageEvents();
     }
+  }
+
+  function selectConversation(turnId) {
+    const turn = conversationTurns.find((item) => item.id === turnId);
+    setActiveTurnId(turnId);
+    setActiveFile(turn?.result?.files?.[0]?.path || "");
+    setSandboxResult(null);
+    setApkResult(null);
+    setError(turn?.status === "error" ? turn.error || "生成失败" : "");
+  }
+
+  function clearConversations() {
+    if (loading) return;
+    setConversationTurns([]);
+    setActiveTurnId("");
+    setActiveFile("");
+    setSandboxResult(null);
+    setApkResult(null);
+    setError("");
   }
 
   async function copyText(text, label) {
@@ -835,6 +961,10 @@ function App() {
         setAllowSandboxInstall={setAllowSandboxInstall}
         onOpenApiSettings={() => setApiDialogOpen(true)}
         projectLibrary={projectLibrary}
+        conversationTurns={conversationTurns}
+        activeTurnId={activeTurnId}
+        onSelectConversation={selectConversation}
+        onClearConversations={clearConversations}
         usageEvents={usageEvents}
         usageNote={usageNote}
         onRefreshUsage={refreshUsageEvents}
@@ -843,8 +973,9 @@ function App() {
       <ChatWindow
         brief={brief}
         setBrief={setBrief}
-        lastPrompt={lastPrompt}
-        result={result}
+        conversationTurns={conversationTurns}
+        activeTurnId={activeTurnId}
+        onSelectConversation={selectConversation}
         selectedFile={selectedFile}
         activeFile={activeFile}
         setActiveFile={setActiveFile}

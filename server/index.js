@@ -21,6 +21,7 @@ import {
   summarizeGeneratedFiles,
   summarizeSteps
 } from "./usageLog.js";
+import { applyRequestSafetyPolicy } from "./requestSafety.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1121,8 +1122,22 @@ app.post("/api/generate", async (req, res) => {
     return;
   }
 
+  const safetyPolicy = applyRequestSafetyPolicy(brief);
+
   if (forceMock || !apiKey) {
-    const result = makeMockResult({ brief, language, framework, includeTests, commentMode });
+    const result = makeMockResult({
+      brief: safetyPolicy.effectiveBrief,
+      language,
+      framework,
+      includeTests,
+      commentMode
+    });
+    if (safetyPolicy.applied) {
+      result.notes = [
+        "Safety override applied: unsafe ticket automation instructions were replaced with authorized API, rate-limit, and dry-run constraints.",
+        ...result.notes
+      ];
+    }
     await appendUsageEvent(USAGE_LOG_FILE, {
       type: "generate",
       status: "ok",
@@ -1132,6 +1147,8 @@ app.post("/api/generate", async (req, res) => {
         mode: "mock",
         forceMock,
         brief: brief.slice(0, 500),
+        safetyOverrideApplied: safetyPolicy.applied,
+        safetyFindings: safetyPolicy.findings,
         language,
         framework,
         agentMode,
@@ -1195,6 +1212,13 @@ app.post("/api/generate", async (req, res) => {
     "- Do not present text displayed by a runTests() button as real tests. If tests are requested, create actual Jest/Vitest/Pytest/etc. test files with assertions and commands that can fail in CI.",
     "- Avoid useCallback/useMemo unless they prevent real work, stabilize a child prop, or match a documented performance need.",
     "- Include notes for remaining demo limitations, production risks, and how to harden them.",
+    "Ticket automation safety rules:",
+    "- Never generate code or instructions that bypass CAPTCHA, queues, login, authentication, anti-bot controls, risk controls, rate limits, or purchase limits.",
+    "- Never generate high-frequency or high-concurrency traffic against third-party ticketing services.",
+    "- Ticket automation may only target APIs and test environments the user owns or is explicitly authorized to use.",
+    "- Default ticket workflows to dry-run or availability notification, use conservative bounded polling, honor Retry-After, and require manual confirmation before a real purchase.",
+    "- Ticket automation clients must have a stop condition, cancellation support, jittered backoff, idempotency keys, secret-redacted audit logs, and a single in-flight order attempt.",
+    "- Tests for ticket automation clients must prove: dry-run sends no purchase request, availability creates at most one order attempt, retries reuse idempotency, 429 honors Retry-After, polling stops at its configured bound, cancellation works, and logs redact tokens/cookies.",
     "Node.js + Express backend rules:",
     "- Generate testable structure by default: src/app.js creates and exports app; src/server.js is the only file that calls app.listen(). Tests must be able to import app without starting a port.",
     "- Prefer this structure for backend projects: src/app.js, src/server.js, src/routes/tickets.js, src/services/ticketService.js, src/middleware/auth.js, src/middleware/rateLimit.js, src/errors.js, tests/tickets.test.js.",
@@ -1218,7 +1242,11 @@ app.post("/api/generate", async (req, res) => {
 
   const userPrompt = JSON.stringify(
     {
-      brief,
+      brief: safetyPolicy.effectiveBrief,
+      safetyOverride: {
+        applied: safetyPolicy.applied,
+        removedRiskCategories: safetyPolicy.findings
+      },
       language,
       framework,
       style,
@@ -1243,6 +1271,8 @@ app.post("/api/generate", async (req, res) => {
         "Generate real automated tests when tests are requested.",
         "For Express APIs, split app.js from server.js so tests can import app without listening on a port.",
         "For ticket or inventory backends, use auth-derived user identity, max quantity limits, duplicate-order prevention, restricted CORS, rate limiting, and classified HTTP errors.",
+        "For ticket automation, use only owned or explicitly authorized APIs; never bypass CAPTCHA, queues, login, risk controls, rate limits, or purchase limits.",
+        "Use bounded polling with jitter and Retry-After support. Default to dry-run or notifications and require manual confirmation for real purchases.",
         "When tests are requested, output test files before implementation files and include concurrency/no-oversell tests.",
         ...buildCommentSafetyRequirements(commentMode),
         "Include a self-check checklist in notes.",
@@ -1419,10 +1449,23 @@ app.post("/api/generate", async (req, res) => {
       }
 
       const result = normalizeGeneratedResult(finalGenerated);
+      if (safetyPolicy.applied) {
+        result.notes = [
+          "Safety override applied: unsafe ticket automation instructions were removed before code generation.",
+          ...result.notes
+        ];
+      }
       result.notes = ["Agent 注释能力：已启用段落级代码注释。", ...result.notes];
       const planSteps = Array.isArray(plan.steps) ? plan.steps : [];
       result.agentTrace = [
-        { step: "分析需求", status: "done", detail: cleanString(plan.goal, brief.slice(0, 120)) },
+        ...(safetyPolicy.applied
+          ? [{
+              step: "Safety scope",
+              status: "warning",
+              detail: `Removed unsafe ticket automation categories: ${safetyPolicy.findings.join(", ")}`
+            }]
+          : []),
+        { step: "分析需求", status: "done", detail: cleanString(plan.goal, safetyPolicy.effectiveBrief.slice(0, 120)) },
         ...planSteps.slice(0, 6).map((item) => ({
           step: cleanString(item.step, "执行步骤"),
           status: "done",
@@ -1448,6 +1491,8 @@ app.post("/api/generate", async (req, res) => {
         detail: {
           mode: "deepseek",
           brief: brief.slice(0, 500),
+          safetyOverrideApplied: safetyPolicy.applied,
+          safetyFindings: safetyPolicy.findings,
           language,
           framework,
           agentMode,
@@ -1473,6 +1518,13 @@ app.post("/api/generate", async (req, res) => {
       ]
     }));
 
+    if (safetyPolicy.applied) {
+      result.notes = [
+        "Safety override applied: unsafe ticket automation instructions were removed before code generation.",
+        ...result.notes
+      ];
+    }
+
     result.notes = ["Agent 注释能力：已启用段落级代码注释。", ...result.notes];
     await appendUsageEvent(USAGE_LOG_FILE, {
       type: "generate",
@@ -1482,6 +1534,8 @@ app.post("/api/generate", async (req, res) => {
       detail: {
         mode: "deepseek",
         brief: brief.slice(0, 500),
+        safetyOverrideApplied: safetyPolicy.applied,
+        safetyFindings: safetyPolicy.findings,
         language,
         framework,
         agentMode,

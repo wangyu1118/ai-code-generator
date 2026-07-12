@@ -254,6 +254,67 @@ button {
   background: #ff9b8c;
 }
 
+.conversation-card {
+  max-height: 270px;
+  overflow: hidden;
+}
+
+.conversation-title {
+  justify-content: space-between;
+}
+
+.conversation-title > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-card .conversation-title button {
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 6px;
+  max-height: 190px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.sidebar-card .conversation-item {
+  display: grid;
+  justify-items: start;
+  gap: 3px;
+  min-height: 48px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.conversation-item strong,
+.conversation-item span {
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-item strong {
+  font-size: 12px;
+}
+
+.conversation-item span {
+  color: #969996;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.sidebar-card .conversation-item.active {
+  border-color: #686b6f;
+  background: #292b2e;
+}
+
 .sidebar-card p,
 .sidebar-note p {
   font-size: 13px;
@@ -381,6 +442,42 @@ button {
 
 .message.user .bubble {
   background: #202123;
+}
+
+.error-bubble {
+  border-color: #6d3c38;
+}
+
+.archived-result {
+  display: grid;
+  gap: 5px;
+  width: min(100%, 860px);
+  border: 1px solid #2a2b2d;
+  border-radius: 8px;
+  padding: 12px 14px;
+  text-align: left;
+  color: #dededb;
+  background: #18191b;
+}
+
+.archived-result:hover {
+  border-color: #55575a;
+  background: #202123;
+}
+
+.archived-result strong,
+.archived-result span {
+  display: block;
+}
+
+.archived-result strong {
+  font-size: 14px;
+}
+
+.archived-result span {
+  color: #9b9c9e;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .bubble.full {
